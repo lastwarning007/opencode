@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-APP=opencode
 
+APP=opencode
+LAUNCHER=lbrun
 MUTED='\033[0;2m'
 RED='\033[0;31m'
 ORANGE='\033[38;5;214m'
@@ -9,15 +10,15 @@ NC='\033[0m' # No Color
 
 usage() {
     cat <<EOF
-OpenCode Installer
+LB CODING Installer (OpenCode based)
 
 Usage: install.sh [options]
 
 Options:
-    -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g., 1.0.180)
-    -b, --binary <path>     Install from a local binary instead of downloading
-        --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
+    -h, --help                  Display this help message
+    -v, --version <version>     Install a specific version (e.g., 1.0.180)
+    -b, --binary <path>         Install from a local binary instead of downloading
+    --no-modify-path            Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
     curl -fsSL https://opencode.ai/install | bash
@@ -79,99 +80,95 @@ else
     raw_os=$(uname -s)
     os=$(echo "$raw_os" | tr '[:upper:]' '[:lower:]')
     case "$raw_os" in
-      Darwin*) os="darwin" ;;
-      Linux*) os="linux" ;;
-      MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+        Darwin*) os="darwin" ;;
+        Linux*) os="linux" ;;
+        MINGW*|MSYS*|CYGWIN*) os="windows" ;;
     esac
 
     arch=$(uname -m)
     if [[ "$arch" == "aarch64" ]]; then
-      arch="arm64"
+        arch="arm64"
     fi
     if [[ "$arch" == "x86_64" ]]; then
-      arch="x64"
+        arch="x64"
     fi
 
     if [ "$os" = "darwin" ] && [ "$arch" = "x64" ]; then
-      rosetta_flag=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
-      if [ "$rosetta_flag" = "1" ]; then
-        arch="arm64"
-      fi
+        rosetta_flag=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
+        if [ "$rosetta_flag" = "1" ]; then
+            arch="arm64"
+        fi
     fi
 
     combo="$os-$arch"
     case "$combo" in
-      linux-x64|linux-arm64|darwin-x64|darwin-arm64|windows-x64)
-        ;;
-      *)
-        echo -e "${RED}Unsupported OS/Arch: $os/$arch${NC}"
-        exit 1
-        ;;
+        linux-x64|linux-arm64|darwin-x64|darwin-arm64|windows-x64)
+            ;;
+        *)
+            echo -e "${RED}Unsupported OS/Arch: $os/$arch${NC}"
+            exit 1
+            ;;
     esac
 
     archive_ext=".zip"
     if [ "$os" = "linux" ]; then
-      archive_ext=".tar.gz"
+        archive_ext=".tar.gz"
     fi
 
     is_musl=false
     if [ "$os" = "linux" ]; then
-      if [ -f /etc/alpine-release ]; then
-        is_musl=true
-      fi
-
-      if command -v ldd >/dev/null 2>&1; then
-        if ldd --version 2>&1 | grep -qi musl; then
-          is_musl=true
+        if [ -f /etc/alpine-release ]; then
+            is_musl=true
         fi
-      fi
+        if command -v ldd >/dev/null 2>&1; then
+            if ldd --version 2>&1 | grep -qi musl; then
+                is_musl=true
+            fi
+        fi
     fi
 
     needs_baseline=false
     if [ "$arch" = "x64" ]; then
-      if [ "$os" = "linux" ]; then
-        if ! grep -qwi avx2 /proc/cpuinfo 2>/dev/null; then
-          needs_baseline=true
+        if [ "$os" = "linux" ]; then
+            if ! grep -qwi avx2 /proc/cpuinfo 2>/dev/null; then
+                needs_baseline=true
+            fi
         fi
-      fi
-
-      if [ "$os" = "darwin" ]; then
-        avx2=$(sysctl -n hw.optional.avx2_0 2>/dev/null || echo 0)
-        if [ "$avx2" != "1" ]; then
-          needs_baseline=true
+        if [ "$os" = "darwin" ]; then
+            avx2=$(sysctl -n hw.optional.avx2_0 2>/dev/null || echo 0)
+            if [ "$avx2" != "1" ]; then
+                needs_baseline=true
+            fi
         fi
-      fi
-
-      if [ "$os" = "windows" ]; then
-        ps="(Add-Type -MemberDefinition \"[DllImport(\"\"kernel32.dll\"\")] public static extern bool IsProcessorFeaturePresent(int ProcessorFeature);\" -Name Kernel32 -Namespace Win32 -PassThru)::IsProcessorFeaturePresent(40)"
-        out=""
-        if command -v powershell.exe >/dev/null 2>&1; then
-          out=$(powershell.exe -NoProfile -NonInteractive -Command "$ps" 2>/dev/null || true)
-        elif command -v pwsh >/dev/null 2>&1; then
-          out=$(pwsh -NoProfile -NonInteractive -Command "$ps" 2>/dev/null || true)
+        if [ "$os" = "windows" ]; then
+            ps="(Add-Type -MemberDefinition \"[DllImport(\"\"kernel32.dll\"\")] public static extern bool IsProcessorFeaturePresent(int ProcessorFeature);\" -Name Kernel32 -Namespace Win32 -PassThru)::IsProcessorFeaturePresent(40)"
+            out=""
+            if command -v powershell.exe >/dev/null 2>&1; then
+                out=$(powershell.exe -NoProfile -NonInteractive -Command "$ps" 2>/dev/null || true)
+            elif command -v pwsh >/dev/null 2>&1; then
+                out=$(pwsh -NoProfile -NonInteractive -Command "$ps" 2>/dev/null || true)
+            fi
+            out=$(echo "$out" | tr -d '\r' | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+            if [ "$out" != "true" ] && [ "$out" != "1" ]; then
+                needs_baseline=true
+            fi
         fi
-        out=$(echo "$out" | tr -d '\r' | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
-        if [ "$out" != "true" ] && [ "$out" != "1" ]; then
-          needs_baseline=true
-        fi
-      fi
     fi
 
     target="$os-$arch"
     if [ "$needs_baseline" = "true" ]; then
-      target="$target-baseline"
+        target="$target-baseline"
     fi
     if [ "$is_musl" = "true" ]; then
-      target="$target-musl"
+        target="$target-musl"
     fi
 
     filename="$APP-$target$archive_ext"
 
-
     if [ "$os" = "linux" ]; then
         if ! command -v tar >/dev/null 2>&1; then
-             echo -e "${RED}Error: 'tar' is required but not installed.${NC}"
-             exit 1
+            echo -e "${RED}Error: 'tar' is required but not installed.${NC}"
+            exit 1
         fi
     else
         if ! command -v unzip >/dev/null 2>&1; then
@@ -219,11 +216,8 @@ print_message() {
 }
 
 check_version() {
-    if command -v opencode >/dev/null 2>&1; then
-        opencode_path=$(which opencode)
-
-        ## Check the installed version
-        installed_version=$(opencode --version 2>/dev/null || echo "")
+    if command -v "$LAUNCHER" >/dev/null 2>&1; then
+        installed_version=$("$LAUNCHER" --version 2>/dev/null || echo "")
 
         if [[ "$installed_version" != "$specific_version" ]]; then
             print_message info "${MUTED}Installed version: ${NC}$installed_version."
@@ -253,6 +247,7 @@ print_progress() {
     local width=50
     local percent=$(( bytes * 100 / length ))
     [ "$percent" -gt 100 ] && percent=100
+
     local on=$(( percent * width / 100 ))
     local off=$(( width - on ))
 
@@ -283,12 +278,9 @@ download_with_progress() {
 
     # Hide cursor
     printf "\033[?25l" >&4
-
     trap "trap - RETURN; rm -f \"$tracefile\"; printf '\033[?25h' >&4; exec 4>&-" RETURN
 
-    (
-        curl --trace-ascii "$tracefile" -s -L -o "$output" "$url"
-    ) &
+    ( curl --trace-ascii "$tracefile" -s -L -o "$output" "$url" ) &
     local curl_pid=$!
 
     unbuffered_sed \
@@ -330,7 +322,6 @@ download_and_install() {
     mkdir -p "$tmp_dir"
 
     if [[ "$os" == "windows" ]] || ! [ -t 2 ] || ! download_with_progress "$url" "$tmp_dir/$filename"; then
-        # Fallback to standard curl on Windows, non-TTY environments, or if custom progress fails
         curl -# -L -o "$tmp_dir/$filename" "$url"
     fi
 
@@ -351,6 +342,17 @@ install_from_binary() {
     chmod 755 "${INSTALL_DIR}/opencode"
 }
 
+# ---- Create the lbrun launcher wrapper ----
+create_launcher() {
+    local launcher_path="${INSTALL_DIR}/${LAUNCHER}"
+    cat > "$launcher_path" <<EOF
+#!/usr/bin/env bash
+exec "${INSTALL_DIR}/opencode" "\$@"
+EOF
+    chmod 755 "$launcher_path"
+    print_message info "${MUTED}Created launcher: ${NC}${launcher_path}"
+}
+
 if [ -n "$binary_path" ]; then
     install_from_binary
 else
@@ -358,6 +360,7 @@ else
     download_and_install
 fi
 
+create_launcher
 
 add_to_path() {
     local config_file=$1
@@ -366,9 +369,9 @@ add_to_path() {
     if grep -Fxq "$command" "$config_file"; then
         print_message info "Command already exists in $config_file, skipping write."
     elif [[ -w $config_file ]]; then
-        echo -e "\n# opencode" >> "$config_file"
+        echo -e "\n# LB CODING (lbrun)" >> "$config_file"
         echo "$command" >> "$config_file"
-        print_message info "${MUTED}Successfully added ${NC}opencode ${MUTED}to \$PATH in ${NC}$config_file"
+        print_message info "${MUTED}Successfully added ${NC}lbrun ${MUTED}to \$PATH in ${NC}$config_file"
     else
         print_message warning "Manually add the directory to $config_file (or similar):"
         print_message info "  $command"
@@ -381,23 +384,22 @@ current_shell=$(basename "$SHELL")
 case $current_shell in
     fish)
         config_files="$HOME/.config/fish/config.fish"
-    ;;
+        ;;
     zsh)
         config_files="${ZDOTDIR:-$HOME}/.zshrc ${ZDOTDIR:-$HOME}/.zshenv $XDG_CONFIG_HOME/zsh/.zshrc $XDG_CONFIG_HOME/zsh/.zshenv"
-    ;;
+        ;;
     bash)
         config_files="$HOME/.bashrc $HOME/.bash_profile $HOME/.profile $XDG_CONFIG_HOME/bash/.bashrc $XDG_CONFIG_HOME/bash/.bash_profile"
-    ;;
+        ;;
     ash)
         config_files="$HOME/.ashrc $HOME/.profile /etc/profile"
-    ;;
+        ;;
     sh)
         config_files="$HOME/.ashrc $HOME/.profile /etc/profile"
-    ;;
+        ;;
     *)
-        # Default case if none of the above matches
         config_files="$HOME/.bashrc $HOME/.bash_profile $XDG_CONFIG_HOME/bash/.bashrc $XDG_CONFIG_HOME/bash/.bash_profile"
-    ;;
+        ;;
 esac
 
 if [[ "$no_modify_path" != "true" ]]; then
@@ -416,24 +418,15 @@ if [[ "$no_modify_path" != "true" ]]; then
         case $current_shell in
             fish)
                 add_to_path "$config_file" "fish_add_path $INSTALL_DIR"
-            ;;
-            zsh)
+                ;;
+            zsh|bash|ash|sh)
                 add_to_path "$config_file" "export PATH=$INSTALL_DIR:\$PATH"
-            ;;
-            bash)
-                add_to_path "$config_file" "export PATH=$INSTALL_DIR:\$PATH"
-            ;;
-            ash)
-                add_to_path "$config_file" "export PATH=$INSTALL_DIR:\$PATH"
-            ;;
-            sh)
-                add_to_path "$config_file" "export PATH=$INSTALL_DIR:\$PATH"
-            ;;
+                ;;
             *)
                 export PATH=$INSTALL_DIR:$PATH
                 print_message warning "Manually add the directory to $config_file (or similar):"
                 print_message info "  export PATH=$INSTALL_DIR:\$PATH"
-            ;;
+                ;;
         esac
     fi
 fi
@@ -443,17 +436,21 @@ if [ -n "${GITHUB_ACTIONS-}" ] && [ "${GITHUB_ACTIONS}" == "true" ]; then
     print_message info "Added $INSTALL_DIR to \$GITHUB_PATH"
 fi
 
+# ---- LB CODING custom banner ----
 echo -e ""
-echo -e "${MUTED}                    ${NC}             ▄     "
-echo -e "${MUTED}█▀▀█ █▀▀█ █▀▀█ █▀▀▄ ${NC}█▀▀▀ █▀▀█ █▀▀█ █▀▀█"
-echo -e "${MUTED}█░░█ █░░█ █▀▀▀ █░░█ ${NC}█░░░ █░░█ █░░█ █▀▀▀"
-echo -e "${MUTED}▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ${NC}▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"
+echo -e "${ORANGE}  ██╗     ██████╗     ██████╗ ██████╗ ██████╗ ██╗███╗   ██╗ ██████╗ ${NC}"
+echo -e "${ORANGE}  ██║     ██╔══██╗   ██╔════╝██╔═══██╗██╔══██╗██║████╗  ██║██╔════╝ ${NC}"
+echo -e "${ORANGE}  ██║     ██████╔╝   ██║     ██║   ██║██║  ██║██║██╔██╗ ██║██║  ███╗${NC}"
+echo -e "${ORANGE}  ██║     ██╔══██╗   ██║     ██║   ██║██║  ██║██║██║╚██╗██║██║   ██║${NC}"
+echo -e "${ORANGE}  ███████╗██████╔╝   ╚██████╗╚██████╔╝██████╔╝██║██║ ╚████║╚██████╔╝${NC}"
+echo -e "${ORANGE}  ╚══════╝╚═════╝     ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝ ${NC}"
 echo -e ""
 echo -e ""
-echo -e "${MUTED}OpenCode includes free models, to start:${NC}"
+echo -e "${MUTED}LB CODING — OpenCode powered${NC}"
+echo -e "${MUTED}Free models included. To start:${NC}"
 echo -e ""
 echo -e "cd <project>  ${MUTED}# Open directory${NC}"
-echo -e "opencode      ${MUTED}# Run command${NC}"
+echo -e "lbrun         ${MUTED}# Run command${NC}"
 echo -e ""
 echo -e "${MUTED}For more information visit ${NC}https://opencode.ai/docs"
 echo -e ""
